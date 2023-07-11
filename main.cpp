@@ -5,6 +5,7 @@
 #include "tgaimage.h"
 #include "model.h"
 #include "geometry.h"
+#include "shaders.h"
 
 const TGAColor white = TGAColor(255, 255, 255, 255);
 const TGAColor red   = TGAColor(255, 0,   0,   255);
@@ -16,7 +17,7 @@ const int width  = 800;
 const int height = 800;
 const int depth = 255;
 Vec3f light_dir(0, 0, -1); // define light_dir
-Vec3f cameraPos(2, 1, 3);
+Vec3f cameraPos(0, 0, 3);
 Vec3f worldUp(0, 1, 0);
 Vec3f centerPosition(0, 0, 1);
 
@@ -104,39 +105,6 @@ void line(Vec2i p0, Vec2i p1, TGAImage& image, const TGAColor& color)
     }
 }
 
-void triangle(Vec3f *pts, Vec2i *uvs, float *zBuffer, TGAImage& image, float intensity)
-{
-    Vec3f t0 = pts[0], t1 = pts[1], t2 = pts[2];
-    float f_max_x = std::max(t0.x,std::max(t1.x, t2.x));
-    float f_max_y = std::max(t0.y,std::max(t1.y, t2.y));
-    float f_min_x = std::min(t0.x,std::min(t1.x, t2.x));
-    float f_min_y = std::min(t0.y,std::min(t1.y, t2.y));
-
-    int max_x = std::ceil(f_max_x);
-    int max_y = std::ceil(f_max_y);
-    int min_x = std::floor(f_min_x);
-    int min_y = std::floor(f_min_y);
-
-    for(int x=min_x;x<=max_x;x++)
-    {
-        for(int y=min_y;y<=max_y;y++)
-        {
-            Vec3f p = {x, y, 0.0};
-            Vec3f baryCoord = barycentric(pts, p);
-            if (baryCoord.x < -0.1 || baryCoord.y < -0.1 || baryCoord.z < -0.1)
-                continue;
-            float z_interpolation = baryCoord.x * pts[0].z + baryCoord.y * pts[1].z + baryCoord.z * pts[2].z;
-            Vec2i uvp = uvs[0] * baryCoord.x + uvs[1] * baryCoord.y + uvs[2] * baryCoord.z;
-            if(z_interpolation > zBuffer[findIndex(x, y)])
-            {
-                zBuffer[findIndex(x, y)] = z_interpolation;
-                TGAColor color = model->diffuse(uvp);
-                image.set(x, y, TGAColor(color.r * intensity, color.g * intensity, color.b * intensity, 255));
-            }
-        }
-    }
-}
-
 Matrix local2homo(Vec3f v)  // to homogeneous coordinates
 {
     Matrix m(4, 1);
@@ -210,6 +178,40 @@ Matrix viewportMatrix(int x, int y, int w, int h) {
     return m;
 }
 
+void triangle(Shaders shader, float *zBuffer, TGAImage& image)
+{
+    Vec3f t0 = shader.screenCoords[0], t1 = shader.screenCoords[1], t2 = shader.screenCoords[2];
+    float f_max_x = std::max(t0.x,std::max(t1.x, t2.x));
+    float f_max_y = std::max(t0.y,std::max(t1.y, t2.y));
+    float f_min_x = std::min(t0.x,std::min(t1.x, t2.x));
+    float f_min_y = std::min(t0.y,std::min(t1.y, t2.y));
+
+    int max_x = std::ceil(f_max_x);
+    int max_y = std::ceil(f_max_y);
+    int min_x = std::floor(f_min_x);
+    int min_y = std::floor(f_min_y);
+
+    for(int x=min_x;x<=max_x;x++)
+    {
+        for(int y=min_y;y<=max_y;y++)
+        {
+            Vec3f p = {x, y, 0.0};
+            Vec3f baryCoord = barycentric(shader.screenCoords, p);
+            TGAColor color;
+            float intensity = shader.gouraudShader(color, baryCoord);
+            if (baryCoord.x < 0 || baryCoord.y < 0 || baryCoord.z < 0 || intensity < 0)
+                continue;
+            float z_interpolation = baryCoord.x * shader.screenCoords[0].z + baryCoord.y * shader.screenCoords[1].z + baryCoord.z * shader.screenCoords[2].z;
+            if(z_interpolation > zBuffer[findIndex(x, y)])
+            {
+                zBuffer[findIndex(x, y)] = z_interpolation;
+                image.set(x, y, color);
+            }
+        }
+    }
+}
+
+
 int main(int argc, char** argv) 
 {
     if (2 == argc) {
@@ -232,31 +234,23 @@ int main(int argc, char** argv)
         zBuffer[i] = -std::numeric_limits<float>::max();
     }
 
-    for (int i=0; i<model->nfaces(); i++) { 
+    for (int i=0; i<model->nfaces(); i++) {
+        Shaders shader;
         std::vector<int> face = model->face(i); 
-        Vec3f screenCoords[3]; 
-        Vec3f worldCoords[3]; 
         for (int j=0; j<3; j++) {
+            shader.iface = i;
+            shader.nvert = j;
             Vec3f v = model->vert(face[j]);
-            worldCoords[j]  = v;
-            screenCoords[j] = homo2vertices(viewport_ * projectionDivision(projection_ * view_ * model_ * local2homo(v)));
-            //std::cout<<"screenCoords[j] = "<<screenCoords[j]<<std::endl;
-        } 
-
-        //triangle(screen_coords, zBuffer, image, TGAColor(rand()%255, rand()%255, rand()%255, 255));
-        Vec3f normal = (worldCoords[2]-worldCoords[0])^(worldCoords[1]-worldCoords[0]); 
-        normal.normalize(); 
-        float intensity = normal * light_dir; 
-        if (intensity > 0) { 
-            Vec2i uv[3];
-            for (int j = 0; j < 3; j++) uv[j] = model->uv(i, j);
-            //std::cout<<screenCoords[0]<<std::endl;
-            triangle(screenCoords, uv, zBuffer, image, intensity);
-        } 
+            shader.worldCoords[j]  = v;
+            shader.screenCoords[j] = homo2vertices(viewport_ * projectionDivision(projection_ * view_ * model_ * local2homo(v)));
+            shader.uv[j] = model->uv(i, j);
+            shader.normal[j] = model->normal(i, j).normalize();
+        }
+        triangle(shader, zBuffer, image);
     }
  
     image.flip_vertically(); // i want to have the origin at the left bottom corner of the image
-    image.write_tga_file("output_CameraRotation.tga");
+    image.write_tga_file("gouraudShader.tga");
     delete model;
     return 0;
 }
