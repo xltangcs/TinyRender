@@ -14,6 +14,9 @@ class Shaders{
         Vec2f uv[3];
         Vec3f normal[3];
 
+        Vec3f varying_intensity;
+        mat<2, 3, float> varying_uv;
+
         Shaders()
         {
             iface = 0;
@@ -35,6 +38,8 @@ class Shaders{
 	        normal[1] = Vec3f(0.0f, 0.0f, 0.0f);
 	        normal[2] = Vec3f(0.0f, 0.0f, 0.0f);
 
+            varying_intensity = Vec3f(0.0f, 0.0f, 0.0f);
+
         }
 
         ~Shaders()
@@ -42,28 +47,31 @@ class Shaders{
 
         };
 
-        float flatShader(TGAColor& color, Vec3f baryCoord)
+        void vertex(int iface, int nthvert)
         {
-            float intensity = 0.0;
-            Vec3f fragment_normal = (worldCoords[2]-worldCoords[0])^(worldCoords[1]-worldCoords[0]); 
-            fragment_normal.normalize();
-            intensity = fragment_normal * light_dir; 
-            color = TGAColor(255* intensity, 255* intensity, 255* intensity, 255);
-            return intensity;
+            varying_uv.set_col(nthvert, model->uv(iface, nthvert));
+            Vec3f normal = proj<3>(embed<4>(model->normal(iface, nthvert))).normalize();
+            varying_intensity[nthvert] = std::max(0.f, model->normal(iface, nthvert)*light_dir); // get diffuse lighting intensity
+        }
+        
+
+        bool FlatShader(TGAColor& color, Vec3f baryCoord)
+        {
+            Vec2f uv = varying_uv * baryCoord; //插值后的uv坐标
+            TGAColor c = model->diffuse(uv); //获取uv贴图
+            Vec3f fragment_normal = cross((worldCoords[2]-worldCoords[0]), (worldCoords[1]-worldCoords[0])).normalize();
+            float intensity = fragment_normal * light_dir; 
+            color = c * intensity;
+            return false;
         }
 
-        float gouraudShader(TGAColor& color, Vec3f baryCoord)
+        bool GouraudShader(TGAColor& color, Vec3f baryCoord)
         {
-            Vec2f uvp = uv[0] * baryCoord.x + uv[1] * baryCoord.y + uv[2] * baryCoord.z;
-            TGAColor c = model->diffuse(uvp);
-
-            Vec3f vertIntensity;
-            for(int i=0; i<3; i++)
-            {
-                vertIntensity[i] = std::max(normal[i].normalize() * light_dir, 0.f);
-            }
-            vertIntensity.normalize();
-            float intensity = vertIntensity * baryCoord;
+            Vec2f uv = varying_uv * baryCoord; //插值后的uv坐标
+            TGAColor c = model->diffuse(uv); //获取uv贴图
+            float intensity = varying_intensity * baryCoord; //插值后的光照强度
+            color = c * intensity; //该点应有的颜色：纹理*光强
+            return false;
             
 
             // float intensity1 = 0.0;
@@ -78,9 +86,17 @@ class Shaders{
             //     std::cout<<"intensity = "<< intensity <<std::endl;
             //     std::cout<<"intensity1 = "<< intensity1 <<std::endl;
             // }
+        }
 
-            color = c * intensity;
-            return intensity;
+        bool ToonShader(TGAColor& color, Vec3f baryCoord)
+        {
+           float intensity = varying_intensity * baryCoord;
+            if (intensity>.85) intensity = 1;
+            else if (intensity>.60) intensity = .80;
+            else if (intensity>.45) intensity = .60;
+            else if (intensity>.30) intensity = .45;
+            else if (intensity>.15) intensity = .30;
+            color = TGAColor(255, 155, 0)*intensity;
+            return false;
         }
 };
-

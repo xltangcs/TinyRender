@@ -105,9 +105,9 @@ void line(Vec2i p0, Vec2i p1, TGAImage& image, const TGAColor& color)
     }
 }
 
-Matrix local2homo(Vec3f v)  // to homogeneous coordinates
+mat<4, 1, float> local2homo(Vec3f v)  // to homogeneous coordinates
 {
-    Matrix m(4, 1);
+    mat<4, 1, float> m;
     m[0][0] = v.x;
     m[1][0] = v.y;
     m[2][0] = v.z;
@@ -115,26 +115,21 @@ Matrix local2homo(Vec3f v)  // to homogeneous coordinates
     return m;
 }
 
-Vec3f homo2vertices(Matrix m)
-{
-    return Vec3f(m[0][0], m[1][0], m[2][0]);
-}
-
 //模型变换矩阵
 Matrix modelMatrix()
 {
-    return Matrix::identity(4);
+    return Matrix::identity();
 }
 
 //视图变换矩阵
 Matrix viewMatrix(Vec3f camera, Vec3f worldup, Vec3f center)
 {
-    Matrix rotation = Matrix::identity(4);
-    Matrix translation = Matrix::identity(4);
+    Matrix rotation = Matrix::identity();
+    Matrix translation = Matrix::identity();
 
     Vec3f z = (camera - center).normalize();
-    Vec3f x = (worldup ^ z).normalize();
-    Vec3f y = (z ^ x).normalize();
+    Vec3f x = cross(worldup , z).normalize();
+    Vec3f y = cross(z , x).normalize();
 
     translation[0][3] = -center[0];
     translation[1][3] = -center[1];
@@ -152,12 +147,12 @@ Matrix viewMatrix(Vec3f camera, Vec3f worldup, Vec3f center)
 //透视投影变换矩阵
 Matrix projectionMatrix()
 {
-    Matrix projection = Matrix::identity(4);
+    Matrix projection = Matrix::identity();
     projection[3][2] = -1.0f / cameraPos.z;
     return projection;
 }
 
-Matrix projectionDivision(Matrix m) 
+mat<4, 1, float> projectionDivision(mat<4, 1, float> m) 
 {
     m[0][0] = m[0][0] / m[3][0];
     m[1][0] = m[1][0] / m[3][0];
@@ -167,7 +162,7 @@ Matrix projectionDivision(Matrix m)
 }
 
 Matrix viewportMatrix(int x, int y, int w, int h) {
-    Matrix m = Matrix::identity(4);
+    Matrix m = Matrix::identity();
     m[0][3] =  x + w / 2.f;
     m[1][3] =  y + h / 2.f;
     m[2][3] = depth / 2.f;
@@ -176,6 +171,11 @@ Matrix viewportMatrix(int x, int y, int w, int h) {
     m[1][1] = h / 2.f;
     m[2][2] = depth / 2.f;
     return m;
+}
+
+Vec3f homo2vertices(mat<4, 1, float> m)
+{
+    return Vec3f(m[0][0], m[1][0], m[2][0]);
 }
 
 void triangle(Shaders shader, float *zBuffer, TGAImage& image)
@@ -196,15 +196,16 @@ void triangle(Shaders shader, float *zBuffer, TGAImage& image)
         for(int y=min_y;y<=max_y;y++)
         {
             Vec3f p = {x, y, 0.0};
-            Vec3f baryCoord = barycentric(shader.screenCoords, p);
             TGAColor color;
-            float intensity = shader.gouraudShader(color, baryCoord);
-            if (baryCoord.x < 0 || baryCoord.y < 0 || baryCoord.z < 0 || intensity < 0)
-                continue;
+            Vec3f baryCoord = barycentric(shader.screenCoords, p);
             float z_interpolation = baryCoord.x * shader.screenCoords[0].z + baryCoord.y * shader.screenCoords[1].z + baryCoord.z * shader.screenCoords[2].z;
-            if(z_interpolation > zBuffer[findIndex(x, y)])
+            int frag_depth = std::max(0, std::min(255, int(z_interpolation + .5)));
+            if (baryCoord.x < 0 || baryCoord.y < 0 || baryCoord.z < 0 || frag_depth < zBuffer[findIndex(x, y)]) continue;
+            
+            bool discard  = shader.GouraudShader(color, baryCoord);
+            if(!discard)
             {
-                zBuffer[findIndex(x, y)] = z_interpolation;
+                zBuffer[findIndex(x, y)] = frag_depth;
                 image.set(x, y, color);
             }
         }
@@ -238,19 +239,16 @@ int main(int argc, char** argv)
         Shaders shader;
         std::vector<int> face = model->face(i); 
         for (int j=0; j<3; j++) {
-            shader.iface = i;
-            shader.nvert = j;
+            shader.vertex(i,j);
             Vec3f v = model->vert(face[j]);
             shader.worldCoords[j]  = v;
             shader.screenCoords[j] = homo2vertices(viewport_ * projectionDivision(projection_ * view_ * model_ * local2homo(v)));
-            shader.uv[j] = model->uv(i, j);
-            shader.normal[j] = model->normal(i, j).normalize();
         }
         triangle(shader, zBuffer, image);
     }
  
     image.flip_vertically(); // i want to have the origin at the left bottom corner of the image
-    image.write_tga_file("gouraudShader.tga");
+    image.write_tga_file("GouraudShader.tga");
     delete model;
     return 0;
 }
