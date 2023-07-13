@@ -16,8 +16,8 @@ Model *model = NULL;
 const int width  = 800;
 const int height = 800;
 const int depth = 255;
-Vec3f light_dir(0, 0, -1); // define light_dir
-Vec3f cameraPos(0, 0, 3);
+Vec3f light_dir(0, 0, 1); // define light_dir
+Vec3f cameraPos(-1, 0, 3);
 Vec3f worldUp(0, 1, 0);
 Vec3f centerPosition(0, 0, 1);
 

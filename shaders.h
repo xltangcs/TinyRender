@@ -50,8 +50,7 @@ class Shaders{
         void vertex(int iface, int nthvert)
         {
             varying_uv.set_col(nthvert, model->uv(iface, nthvert));
-            Vec3f normal = proj<3>(embed<4>(model->normal(iface, nthvert))).normalize();
-            varying_intensity[nthvert] = std::max(0.f, model->normal(iface, nthvert)*light_dir); // get diffuse lighting intensity
+            varying_intensity[nthvert] = std::max(0.f, model->normal(iface, nthvert)*(light_dir.normalize())); // get diffuse lighting intensity
         }
         
 
