@@ -1,2 +1,0 @@
-# TinyRender
-a tinyrenderer
